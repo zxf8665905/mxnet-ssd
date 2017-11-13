@@ -4,6 +4,8 @@ import numpy as np
 from timeit import default_timer as timer
 from dataset.testdb import TestDB
 from dataset.iterator import DetIter
+import cv2
+import time
 
 class Detector(object):
     """
@@ -117,7 +119,8 @@ class Detector(object):
         """
         import matplotlib.pyplot as plt
         import random
-        plt.imshow(img)
+
+        # plt.imshow(img)
         height = img.shape[0]
         width = img.shape[1]
         colors = dict()
@@ -136,15 +139,20 @@ class Detector(object):
                                          ymax - ymin, fill=False,
                                          edgecolor=colors[cls_id],
                                          linewidth=3.5)
-                    plt.gca().add_patch(rect)
+                    c = (int(colors[cls_id][0]*255), int(colors[cls_id][1]*255), int(colors[cls_id][2]*255))
+                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=c, thickness=1)
+                    # plt.gca().add_patch(rect)
                     class_name = str(cls_id)
                     if classes and len(classes) > cls_id:
                         class_name = classes[cls_id]
-                    plt.gca().text(xmin, ymin - 2,
-                                    '{:s} {:.3f}'.format(class_name, score),
-                                    bbox=dict(facecolor=colors[cls_id], alpha=0.5),
-                                    fontsize=12, color='white')
-        plt.show()
+                    # plt.gca().text(xmin, ymin - 2,
+                    #                 '{:s} {:.3f}'.format(class_name, score),
+                    #                 bbox=dict(facecolor=colors[cls_id], alpha=0.5),
+                    #                 fontsize=12, color='white')
+        # plt.show()
+        output_path = './output/{}.png'.format(int(time.time()*1000))
+        print('write: {}'.format(output_path))
+        cv2.imwrite(output_path, img)
 
     def detect_and_visualize(self, im_list, root_dir=None, extension=None,
                              classes=[], thresh=0.6, show_timer=False):
