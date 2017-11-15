@@ -208,6 +208,7 @@ def multibox_layer(from_layers, num_classes, sizes=[.2, .95],
         assert len(steps) == len(from_layers), "provide steps for all layers or leave empty"
 
     loc_pred_layers = []
+    orien_pred_layers = []
     cls_pred_layers = []
     anchor_layers = []
     num_classes += 1 # always use background as label 0
@@ -245,12 +246,18 @@ def multibox_layer(from_layers, num_classes, sizes=[.2, .95],
         num_loc_pred = num_anchors * 4
         bias = mx.symbol.Variable(name="{}_loc_pred_conv_bias".format(from_name),
             init=mx.init.Constant(0.0), attr={'__lr_mult__': '2.0'})
-        loc_pred = mx.symbol.Convolution(data=from_layer, bias=bias, kernel=(3,3), \
-            stride=(1,1), pad=(1,1), num_filter=num_loc_pred, \
+        loc_orien_pred = mx.symbol.Convolution(data=from_layer, bias=bias, kernel=(3,3), \
+            stride=(1,1), pad=(1,1), num_filter=num_loc_pred + num_anchors*1, # include orientation\
             name="{}_loc_pred_conv".format(from_name))
+        loc_pred = mx.sym.slice_axis(loc_orien_pred,axis=1,begin=0,end=num_anchors * 4)
         loc_pred = mx.symbol.transpose(loc_pred, axes=(0,2,3,1))
         loc_pred = mx.symbol.Flatten(data=loc_pred)
         loc_pred_layers.append(loc_pred)
+        # orientation
+        orien_pred = mx.sym.slice_axis(loc_orien_pred,axis=1,begin=num_anchors * 4,end=(num_anchors+1) * 4)
+        orien_pred = mx.symbol.transpose(orien_pred, axes=(0,2,3,1))
+        orien_pred = mx.symbol.Flatten(data=orien_pred)
+        orien_pred_layers.append(orien_pred)
 
         # create class prediction layer
         num_cls_pred = num_anchors * num_classes
@@ -275,6 +282,8 @@ def multibox_layer(from_layers, num_classes, sizes=[.2, .95],
 
     loc_preds = mx.symbol.Concat(*loc_pred_layers, num_args=len(loc_pred_layers), \
         dim=1, name="multibox_loc_pred")
+    orien_preds = mx.symbol.Concat(*orien_pred_layers, num_args=len(orien_pred_layers), \
+                                 dim=1, name="multibox_orien_pred")
     cls_preds = mx.symbol.Concat(*cls_pred_layers, num_args=len(cls_pred_layers), \
         dim=1)
     cls_preds = mx.symbol.Reshape(data=cls_preds, shape=(0, -1, num_classes))
@@ -282,4 +291,4 @@ def multibox_layer(from_layers, num_classes, sizes=[.2, .95],
     anchor_boxes = mx.symbol.Concat(*anchor_layers, \
         num_args=len(anchor_layers), dim=1)
     anchor_boxes = mx.symbol.Reshape(data=anchor_boxes, shape=(0, -1, 4), name="multibox_anchors")
-    return [loc_preds, cls_preds, anchor_boxes]
+    return [loc_preds, orien_preds, cls_preds, anchor_boxes]

@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 import mxnet as mx
 from .common import multi_layer_feature, multibox_layer
+import math
 
 
 def import_module(module_name):
@@ -12,7 +13,7 @@ def import_module(module_name):
 
 def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pads,
                      sizes, ratios, normalizations=-1, steps=[], min_filter=128,
-                     nms_thresh=0.5, force_suppress=False, nms_topk=400, **kwargs):
+                     nms_thresh=0.5, force_suppress=False, nms_topk=400,is_train = True, **kwargs):
     """Build network symbol for training SSD
 
     Parameters
@@ -62,23 +63,26 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
     mx.Symbol
 
     """
-    label = mx.sym.Variable('label')
+    loc_cls_label = mx.sym.Variable('loc_cls_label')
+    orien_label = mx.sym.Variable('orien_label')
     body = import_module(network).get_symbol(num_classes, **kwargs)
     layers = multi_layer_feature(body, from_layers, num_filters, strides, pads,
         min_filter=min_filter)
 
-    loc_preds, cls_preds, anchor_boxes = multibox_layer(layers, \
+    loc_preds, orien_preds, cls_preds, anchor_boxes = multibox_layer(layers, \
         num_classes, sizes=sizes, ratios=ratios, normalization=normalizations, \
         num_channels=num_filters, clip=False, interm_layer=0, steps=steps)
 
     tmp = mx.contrib.symbol.MultiBoxTarget(
-        *[anchor_boxes, label, cls_preds], overlap_threshold=.5, \
+        *[anchor_boxes, loc_cls_label, cls_preds], overlap_threshold=.5, \
         ignore_label=-1, negative_mining_ratio=3, minimum_negative_samples=0, \
         negative_mining_thresh=.5, variances=(0.1, 0.1, 0.2, 0.2),
         name="multibox_target")
     loc_target = tmp[0]
     loc_target_mask = tmp[1]
     cls_target = tmp[2]
+    orien_target = orien_label / 2*math.pi
+    orien_target_mask = (cls_target != -1)*(cls_target != 0)
 
     cls_prob = mx.symbol.SoftmaxOutput(data=cls_preds, label=cls_target, \
         ignore_label=-1, use_ignore=True, grad_scale=1., multi_output=True, \
@@ -87,16 +91,24 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
         data=loc_target_mask * (loc_preds - loc_target), scalar=1.0)
     loc_loss = mx.symbol.MakeLoss(loc_loss_, grad_scale=1., \
         normalization='valid', name="loc_loss")
+    # orientation
+    orien_loss_ = mx.symbol.smooth_l1(name="orien_loss_", \
+        data=orien_target_mask * (orien_preds - orien_target), scalar=1.0)
+    orien_loss = mx.symbol.MakeLoss(orien_loss_, grad_scale=1., \
+        normalization='valid', name="loc_loss")
 
     # monitoring training status
     cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
     det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
         name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
+    if not is_train:
+        orien = orien_preds * 2 * math.pi
+        return mx.symbol.Group([det, orien])
     det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
 
     # group output
-    out = mx.symbol.Group([cls_prob, loc_loss, cls_label, det])
+    out = mx.symbol.Group([cls_prob, loc_loss, orien_loss, cls_label, det])
     return out
 
 def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
