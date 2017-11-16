@@ -100,134 +100,32 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
         arg_params=None, aux_params=None, allow_missing=False,
         force_rebind=False, force_init=False, begin_epoch=0, num_epoch=None,
         validation_metric=None, monitor=None):
-    """Trains the module parameters.
 
-    Checkout `Module Tutorial <http://mxnet.io/tutorials/basic/module.html>`_ to see
-    a end-to-end use-case.
-
-    Parameters
-    ----------
-    train_data : DataIter
-        Train DataIter.
-    eval_data : DataIter
-        If not ``None``, will be used as validation set and the performance
-        after each epoch will be evaluated.
-    eval_metric : str or EvalMetric
-        Defaults to 'accuracy'. The performance measure used to display during training.
-        Other possible predefined metrics are:
-        'ce' (CrossEntropy), 'f1', 'mae', 'mse', 'rmse', 'top_k_accuracy'.
-    epoch_end_callback : function or list of functions
-        Each callback will be called with the current `epoch`, `symbol`, `arg_params`
-        and `aux_params`.
-    batch_end_callback : function or list of function
-        Each callback will be called with a `BatchEndParam`.
-    kvstore : str or KVStore
-        Defaults to 'local'.
-    optimizer : str or Optimizer
-        Defaults to 'sgd'.
-    optimizer_params : dict
-        Defaults to ``(('learning_rate', 0.01),)``. The parameters for
-        the optimizer constructor.
-        The default value is not a dict, just to avoid pylint warning on dangerous
-        default values.
-    eval_end_callback : function or list of function
-        These will be called at the end of each full evaluation, with the metrics over
-        the entire evaluation set.
-    eval_batch_end_callback : function or list of function
-        These will be called at the end of each mini-batch during evaluation.
-    initializer : Initializer
-        The initializer is called to initialize the module parameters when they are
-        not already initialized.
-    arg_params : dict
-        Defaults to ``None``, if not ``None``, should be existing parameters from a trained
-        model or loaded from a checkpoint (previously saved model). In this case,
-        the value here will be used to initialize the module parameters, unless they
-        are already initialized by the user via a call to `init_params` or `fit`.
-        `arg_params` has a higher priority than `initializer`.
-    aux_params : dict
-        Defaults to ``None``. Similar to `arg_params`, except for auxiliary states.
-    allow_missing : bool
-        Defaults to ``False``. Indicates whether to allow missing parameters when `arg_params`
-        and `aux_params` are not ``None``. If this is ``True``, then the missing parameters
-        will be initialized via the `initializer`.
-    force_rebind : bool
-        Defaults to ``False``. Whether to force rebinding the executors if already bound.
-    force_init : bool
-        Defaults to ``False``. Indicates whether to force initialization even if the
-        parameters are already initialized.
-    begin_epoch : int
-        Defaults to 0. Indicates the starting epoch. Usually, if resumed from a
-        checkpoint saved at a previous training phase at epoch N, then this value should be
-        N+1.
-    num_epoch : int
-        Number of epochs for training.
-
-    Examples
-    --------
-    # >>> # An example of using fit for training.
-    # >>> # Assume training dataIter and validation dataIter are ready
-    # >>> # Assume loading a previously checkpointed model
-    # >>> sym, arg_params, aux_params = mx.model.load_checkpoint(model_prefix, 3)
-    # >>> mod.fit(train_data=train_dataiter, eval_data=val_dataiter, optimizer='sgd',
-    # ...     optimizer_params={'learning_rate':0.01, 'momentum': 0.9},
-    # ...     arg_params=arg_params, aux_params=aux_params,
-    # ...     eval_metric='acc', num_epoch=10, begin_epoch=3)
-    """
     assert num_epoch is not None, 'please specify number of epochs'
 
-    model.bind(data_shapes=train_data.provide_data, label_shapes=train_data.provide_label,
+    model.bind(data_shapes=[('data',(1,3,300,300))],
+               label_shapes=[('loc_cls_label',((1,58,6))), ('orien_label', (1,58,1))],
               for_training=True, force_rebind=force_rebind)
-    if monitor is not None:
-        model.install_monitor(monitor)
+
     model.init_params(initializer=initializer, arg_params=arg_params, aux_params=aux_params,
                      allow_missing=allow_missing, force_init=force_init)
     model.init_optimizer(kvstore=kvstore, optimizer=optimizer,
                         optimizer_params=optimizer_params)
 
-    if validation_metric is None:
-        validation_metric = eval_metric
-    if not isinstance(eval_metric, metric.EvalMetric):
-        eval_metric = metric.create(eval_metric)
+
 
     ################################################################################
     # training loop
     ################################################################################
     for epoch in range(begin_epoch, num_epoch):
         tic = time.time()
-        eval_metric.reset()
         nbatch = 0
-        data_iter = iter(train_data)
-        end_of_batch = False
-        next_data_batch = next(data_iter)
-        while not end_of_batch:
-            data_batch = next_data_batch
-            if monitor is not None:
-                monitor.tic()
-            model.forward_backward(data_batch)
-            model.update()
-            try:
-                # pre fetch next batch
-                next_data_batch = next(data_iter)
-                model.prepare(next_data_batch)
-            except StopIteration:
-                end_of_batch = True
+        data_batch = None # todo
+        model.forward_backward(data_batch)
+        model.update()
 
-            # model.update_metric(eval_metric, data_batch.label)
+        nbatch += 1
 
-            if monitor is not None:
-                monitor.toc_print()
-
-            if batch_end_callback is not None:
-                batch_end_params = BatchEndParam(epoch=epoch, nbatch=nbatch,
-                                                 eval_metric=eval_metric,
-                                                 locals=locals())
-                for callback in _as_list(batch_end_callback):
-                    callback(batch_end_params)
-            nbatch += 1
-
-        # one epoch of training is finished
-        for name, val in eval_metric.get_name_value():
-            model.logger.info('Epoch[%d] Train-%s=%f', epoch, name, val)
         toc = time.time()
         model.logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc-tic))
 
@@ -235,22 +133,6 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
         arg_params, aux_params = model.get_params()
         model.set_params(arg_params, aux_params)
 
-        if epoch_end_callback is not None:
-            for callback in _as_list(epoch_end_callback):
-                callback(epoch, model.symbol, arg_params, aux_params)
-
-        #----------------------------------------
-        # evaluation on validation set
-        if eval_data:
-            res = model.score(eval_data, validation_metric,
-                             score_end_callback=eval_end_callback,
-                             batch_end_callback=eval_batch_end_callback, epoch=epoch)
-            #TODO: pull this into default
-            for name, val in res:
-                model.logger.info('Epoch[%d] Validation-%s=%f', epoch, name, val)
-
-        # end of 1 epoch, reset the data-iter for another epoch
-    train_data.reset()
 
 def train_net(net, train_path, num_classes, batch_size,
               data_shape, mean_pixels, resume, finetune, pretrained, epoch,
@@ -349,15 +231,16 @@ def train_net(net, train_path, num_classes, batch_size,
     if isinstance(mean_pixels, (int, float)):
         mean_pixels = [mean_pixels, mean_pixels, mean_pixels]
     assert len(mean_pixels) == 3, "must provide all RGB mean values"
-
-    train_iter = DetRecordIter(train_path, batch_size, data_shape, mean_pixels=mean_pixels,
-        label_pad_width=label_pad_width, path_imglist=train_list, **cfg.train)
-
-    if val_path:
-        val_iter = DetRecordIter(val_path, batch_size, data_shape, mean_pixels=mean_pixels,
-            label_pad_width=label_pad_width, path_imglist=val_list, **cfg.valid)
-    else:
-        val_iter = None
+    #
+    # train_iter = DetRecordIter(train_path, batch_size, data_shape, mean_pixels=mean_pixels,
+    #     label_pad_width=label_pad_width, path_imglist=train_list, **cfg.train)
+    #
+    # if val_path:
+    #     val_iter = DetRecordIter(val_path, batch_size, data_shape, mean_pixels=mean_pixels,
+    #         label_pad_width=label_pad_width, path_imglist=val_list, **cfg.valid)
+    # else:
+    #     val_iter = None
+    train_iter,val_iter = None, None
 
     # load symbol
     net = get_symbol_train(net, data_shape[1], num_classes=num_classes,
@@ -411,12 +294,14 @@ def train_net(net, train_path, num_classes, batch_size,
         logger.info("Freezed parameters: [" + ','.join(fixed_param_names) + ']')
 
     # init training module
-    mod = mx.mod.Module(net, label_names=('label',), logger=logger, context=ctx,
+    mod = mx.mod.Module(net, label_names=('loc_cls_label','orien_label'), logger=logger, context=ctx,
                         fixed_param_names=fixed_param_names)
 
     # fit parameters
-    batch_end_callback = mx.callback.Speedometer(train_iter.batch_size, frequent=frequent)
-    epoch_end_callback = mx.callback.do_checkpoint(prefix)
+    # batch_end_callback = mx.callback.Speedometer(train_iter.batch_size, frequent=frequent)
+    # epoch_end_callback = mx.callback.do_checkpoint(prefix)
+    batch_end_callback = None
+    epoch_end_callback = None
     learning_rate, lr_scheduler = get_lr_scheduler(learning_rate, lr_refactor_step,
         lr_refactor_ratio, num_example, batch_size, begin_epoch)
     optimizer_params={'learning_rate':learning_rate,

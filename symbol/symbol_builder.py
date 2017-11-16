@@ -95,7 +95,7 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
     orien_loss_ = mx.symbol.smooth_l1(name="orien_loss_", \
         data=orien_target_mask * (orien_preds - orien_target), scalar=1.0)
     orien_loss = mx.symbol.MakeLoss(orien_loss_, grad_scale=1., \
-        normalization='valid', name="loc_loss")
+        normalization='valid', name="orien_loss")
 
     # monitoring training status
     cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
