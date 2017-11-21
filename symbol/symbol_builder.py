@@ -2,6 +2,7 @@ from __future__ import absolute_import
 import mxnet as mx
 from .common import multi_layer_feature, multibox_layer
 import math
+import symbol.attrs_target
 
 
 def import_module(module_name):
@@ -64,14 +65,17 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
 
     """
     loc_cls_label = mx.sym.Variable('loc_cls_label')
-    orien_label = mx.sym.Variable('orien_label')
+    attrs_label = mx.sym.Variable('attrs_label')
     body = import_module(network).get_symbol(num_classes, **kwargs)
     layers = multi_layer_feature(body, from_layers, num_filters, strides, pads,
         min_filter=min_filter)
 
-    loc_preds, orien_preds, cls_preds, anchor_boxes = multibox_layer(layers, \
+    loc_preds, attrs_preds, cls_preds, anchor_boxes = multibox_layer(layers, \
         num_classes, sizes=sizes, ratios=ratios, normalization=normalizations, \
         num_channels=num_filters, clip=False, interm_layer=0, steps=steps)
+    
+    batch_attrs_target, batch_attrs_target_mask = mx.symbol.Custom(loc_cls_label=loc_cls_label, attrs_label=attrs_label,
+                              anchors=anchor_boxes, op_type='attrs_target_op')
 
     tmp = mx.contrib.symbol.MultiBoxTarget(
         *[anchor_boxes, loc_cls_label, cls_preds], overlap_threshold=.5, \
@@ -81,7 +85,7 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
     loc_target = tmp[0]
     loc_target_mask = tmp[1]
     cls_target = tmp[2]
-    orien_target = orien_label / 2*math.pi
+
     orien_target_mask = (cls_target != -1)*(cls_target != 0)
 
     cls_prob = mx.symbol.SoftmaxOutput(data=cls_preds, label=cls_target, \
@@ -92,10 +96,10 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
     loc_loss = mx.symbol.MakeLoss(loc_loss_, grad_scale=1., \
         normalization='valid', name="loc_loss")
     # orientation
-    orien_loss_ = mx.symbol.smooth_l1(name="orien_loss_", \
-        data=orien_target_mask * (orien_preds - orien_target), scalar=1.0)
-    orien_loss = mx.symbol.MakeLoss(orien_loss_, grad_scale=1., \
-        normalization='valid', name="orien_loss")
+    attrs_loss_ = mx.symbol.smooth_l1(name="attrs_loss_", \
+        data=orien_target_mask * (attrs_preds - batch_attrs_target), scalar=1.0)
+    attrs_loss = mx.symbol.MakeLoss(attrs_loss_, grad_scale=1., \
+        normalization='valid', name="attrs_loss")
 
     # monitoring training status
     cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
@@ -103,12 +107,12 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
         name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
     if not is_train:
-        orien = orien_preds * 2 * math.pi
+        orien = attrs_preds * 2 * math.pi
         return mx.symbol.Group([det, orien])
     det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
 
     # group output
-    out = mx.symbol.Group([cls_prob, loc_loss, orien_loss, cls_label, det])
+    out = mx.symbol.Group([cls_prob, loc_loss, attrs_loss, cls_label, det])
     return out
 
 def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
@@ -177,3 +181,5 @@ def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
         name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
     return out
+
+
