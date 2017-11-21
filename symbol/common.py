@@ -256,7 +256,7 @@ def multibox_layer(from_layers, num_classes, sizes=[.2, .95],
         loc_pred_layers.append(loc_pred)
 
         # attrs
-        attrs_pred = mx.sym.slice_axis(loc_orien_pred,axis=1,begin=num_anchors * 4,end=(num_anchors + n_attrs) * 4)
+        attrs_pred = mx.sym.slice_axis(loc_orien_pred,axis=1,begin=num_anchors * 4,end= num_anchors * 4 + num_anchors* n_attrs)
         attrs_pred = mx.symbol.transpose(attrs_pred, axes=(0,2,3,1))
         attrs_pred = mx.symbol.Flatten(data=attrs_pred)
         attrs_pred_layers.append(attrs_pred)

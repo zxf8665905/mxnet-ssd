@@ -86,7 +86,6 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
     loc_target_mask = tmp[1]
     cls_target = tmp[2]
 
-    orien_target_mask = (cls_target != -1)*(cls_target != 0)
 
     cls_prob = mx.symbol.SoftmaxOutput(data=cls_preds, label=cls_target, \
         ignore_label=-1, use_ignore=True, grad_scale=1., multi_output=True, \
@@ -95,9 +94,10 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
         data=loc_target_mask * (loc_preds - loc_target), scalar=1.0)
     loc_loss = mx.symbol.MakeLoss(loc_loss_, grad_scale=1., \
         normalization='valid', name="loc_loss")
-    # orientation
+
+    # attrs
     attrs_loss_ = mx.symbol.smooth_l1(name="attrs_loss_", \
-        data=orien_target_mask * (attrs_preds - batch_attrs_target), scalar=1.0)
+        data=batch_attrs_target_mask * (attrs_preds - batch_attrs_target), scalar=1.0)
     attrs_loss = mx.symbol.MakeLoss(attrs_loss_, grad_scale=1., \
         normalization='valid', name="attrs_loss")
 
@@ -107,8 +107,7 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
         name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
     if not is_train:
-        orien = attrs_preds * 2 * math.pi
-        return mx.symbol.Group([det, orien])
+        return mx.symbol.Group([det, attrs_preds])
     det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
 
     # group output
