@@ -14,6 +14,13 @@ from mxnet import metric
 from mxnet.initializer import Uniform
 from mxnet.model import BatchEndParam
 import time
+from tools.data import load_label, draw_box, box_decode
+import glob
+import cv2
+from tools.image_processing import preprocess
+import numpy as np
+from collections import namedtuple
+
 
 def convert_pretrained(name, args):
     """
@@ -103,9 +110,11 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
 
     assert num_epoch is not None, 'please specify number of epochs'
 
-    model.bind(data_shapes=[('data',(1,3,300,300))],
-               label_shapes=[('loc_cls_label',((1,58,6))), ('orien_label', (1,58,1))],
-              for_training=True, force_rebind=force_rebind)
+    batch_size = 1
+    model.bind(data_shapes=[('data', (batch_size, 3, 300, 300))],
+             label_shapes = [('loc_cls_label', (batch_size, 58, 6)),
+                             ('attrs_label', (batch_size, 58, 3))],
+               for_training=True, force_rebind=force_rebind)
 
     model.init_params(initializer=initializer, arg_params=arg_params, aux_params=aux_params,
                      allow_missing=allow_missing, force_init=force_init)
@@ -117,21 +126,68 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
     ################################################################################
     # training loop
     ################################################################################
+    data_paths = glob.glob('../data/demo/*.png')
+    datas = [cv2.imread(path) for path in data_paths]
+    labels = load_label('../data/demo/2_frame_label.json')
+    label_color={}
+    label_color['parking_space'] = (25,125,23)
+    label_color['road'] = (13,13,80)
+    label_id = {}
+    label_id['parking_space'] = 1
+    label_id['road'] = 2
+
     for epoch in range(begin_epoch, num_epoch):
-        tic = time.time()
-        nbatch = 0
-        data_batch = None # todo
-        model.forward_backward(data_batch)
-        model.update()
 
-        nbatch += 1
+        for n_frame, data in enumerate(datas):
+            data_pre = preprocess(data)
+            vis_img = (data_pre.copy() * 255).astype(np.uint8)
 
-        toc = time.time()
-        model.logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc-tic))
+            objs_loc_cls = []
+            objs_attrs =[]
+            imgs = []
+            for n_obj, obj in enumerate(labels['frames'][n_frame]['objects']):
+                box = np.array(obj['point']).reshape((4, 2))
+                vis_img = draw_box(vis_img, box, color=label_color[obj['type']])
+                box_info = box_decode(box)
+                # loc cls
+                single_loc_cls = np.zeros((6,))
+                single_loc_cls[0] = label_id[obj['type']]
+                single_loc_cls[1:5] = box_info.bbox
+                objs_loc_cls.append(single_loc_cls)
+                # attrs
+                single_attrs = box_info.attr
+                objs_attrs.append(single_attrs)
+            imgs.append(data_pre)
 
-        # sync aux params across devices
-        arg_params, aux_params = model.get_params()
-        model.set_params(arg_params, aux_params)
+            o_path = '../data/demo/output/{}.png'.format(n_frame)
+            cv2.imwrite(o_path, vis_img)
+            print('writed:{}'.format(o_path))
+
+            tic = time.time()
+            nbatch = 0
+
+            # construct batch data
+            loc_cls_label = np.ones((batch_size, 58, 6), dtype=np.float32) * -1.0
+            loc_cls_label[:, :len(objs_loc_cls), :] = np.array(objs_loc_cls)
+
+            attrs_label = np.ones((batch_size, 58, 3), dtype=np.float32) * -1.0
+            attrs_label[:, :len(objs_attrs), :] = np.array(objs_attrs)
+            Batch = namedtuple('Batch', ['data', 'label'])
+            data_batch = Batch(data=[mx.nd.array(imgs)],
+                              label=[mx.nd.array(loc_cls_label), mx.nd.array(attrs_label)])
+            model.forward_backward(data_batch)
+            model.update()
+
+            nbatch += 1
+
+            toc = time.time()
+            model.logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc-tic))
+
+            # sync aux params across devices
+            arg_params, aux_params = model.get_params()
+            model.set_params(arg_params, aux_params)
+
+
 
 
 def train_net(net, train_path, num_classes, batch_size,
@@ -294,7 +350,7 @@ def train_net(net, train_path, num_classes, batch_size,
         logger.info("Freezed parameters: [" + ','.join(fixed_param_names) + ']')
 
     # init training module
-    mod = mx.mod.Module(net, label_names=('loc_cls_label','orien_label'), logger=logger, context=ctx,
+    mod = mx.mod.Module(net, label_names=('loc_cls_label', 'attrs_label'), logger=logger, context=ctx,
                         fixed_param_names=fixed_param_names)
 
     # fit parameters
