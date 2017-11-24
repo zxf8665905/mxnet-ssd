@@ -174,7 +174,7 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
 
             attrs_label = np.ones((batch_size, 58, 3), dtype=np.float32) * -1.0
             attrs_label[:, :len(objs_attrs), :] = np.array(objs_attrs)
-            data_batch = Batch(data=[mx.nd.array(imgs)],
+            data_batch = Batch(data=[mx.nd.transpose(mx.nd.array(imgs), axes=(0,3,2,1))],
                               label=[mx.nd.array(loc_cls_label), mx.nd.array(attrs_label)])
             model.forward_backward(data_batch)
             model.update()

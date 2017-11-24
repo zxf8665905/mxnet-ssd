@@ -92,26 +92,26 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
         normalization='valid', name="cls_prob")
     loc_loss_ = mx.symbol.smooth_l1(name="loc_loss_", \
         data=loc_target_mask * (loc_preds - loc_target), scalar=1.0)
-    loc_loss = mx.symbol.MakeLoss(loc_loss_, grad_scale=1., \
+    loc_loss = mx.symbol.MakeLoss(mx.sym.sum(loc_loss_), grad_scale=1., \
         normalization='valid', name="loc_loss")
 
     # attrs
     attrs_loss_ = mx.symbol.smooth_l1(name="attrs_loss_", \
         data=batch_attrs_target_mask * (attrs_preds - batch_attrs_target), scalar=1.0)
-    attrs_loss = mx.symbol.MakeLoss(attrs_loss_, grad_scale=1., \
+    attrs_loss = mx.symbol.MakeLoss(mx.sym.sum(attrs_loss_), grad_scale=1., \
         normalization='valid', name="attrs_loss")
 
-    # monitoring training status
-    cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
-    det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
-        name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
-        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
-    if not is_train:
-        return mx.symbol.Group([det, attrs_preds])
-    det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
+    # # monitoring training status
+    # cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
+    # det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
+    #     name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
+    #     variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
+    # if not is_train:
+    #     return mx.symbol.Group([det, attrs_preds])
+    # det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
 
     # group output
-    out = mx.symbol.Group([cls_prob, loc_loss, attrs_loss, cls_label, det])
+    out = mx.symbol.Group([cls_prob, loc_loss, attrs_loss])
     return out
 
 def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
