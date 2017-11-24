@@ -126,15 +126,17 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
     ################################################################################
     # training loop
     ################################################################################
-    data_paths = glob.glob('../data/demo/*.png')
+    data_paths = glob.glob('data/demo/*.png')
     datas = [cv2.imread(path) for path in data_paths]
-    labels = load_label('../data/demo/2_frame_label.json')
+    labels = load_label('data/demo/2_frame_label.json')
     label_color={}
     label_color['parking_space'] = (25,125,23)
     label_color['road'] = (13,13,80)
     label_id = {}
     label_id['parking_space'] = 1
     label_id['road'] = 2
+
+    Batch = namedtuple('Batch', ['data', 'label'])
 
     for epoch in range(begin_epoch, num_epoch):
 
@@ -152,7 +154,7 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
                 # loc cls
                 single_loc_cls = np.zeros((6,))
                 single_loc_cls[0] = label_id[obj['type']]
-                single_loc_cls[1:5] = box_info.bbox
+                single_loc_cls[1:5] = box_info.bbox.flatten()
                 objs_loc_cls.append(single_loc_cls)
                 # attrs
                 single_attrs = box_info.attr
@@ -172,7 +174,6 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
 
             attrs_label = np.ones((batch_size, 58, 3), dtype=np.float32) * -1.0
             attrs_label[:, :len(objs_attrs), :] = np.array(objs_attrs)
-            Batch = namedtuple('Batch', ['data', 'label'])
             data_batch = Batch(data=[mx.nd.array(imgs)],
                               label=[mx.nd.array(loc_cls_label), mx.nd.array(attrs_label)])
             model.forward_backward(data_batch)
