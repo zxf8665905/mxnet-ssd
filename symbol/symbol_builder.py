@@ -101,17 +101,17 @@ def get_symbol_train(network, num_classes, from_layers, num_filters, strides, pa
     attrs_loss = mx.symbol.MakeLoss(mx.sym.sum(attrs_loss_), grad_scale=1., \
         normalization='valid', name="attrs_loss")
 
-    # # monitoring training status
-    # cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
-    # det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
-    #     name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
-    #     variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
-    # if not is_train:
-    #     return mx.symbol.Group([det, attrs_preds])
-    # det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
+    # monitoring training status
+    cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
+    det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
+        name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
+        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
+    if not is_train:
+        return mx.symbol.Group([det, attrs_preds])
+    det = mx.symbol.MakeLoss(data=det, grad_scale=0, name="det_out")
 
     # group output
-    out = mx.symbol.Group([cls_prob, loc_loss, attrs_loss])
+    out = mx.symbol.Group([cls_prob, loc_loss, cls_label, det, attrs_loss])
     return out
 
 def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
@@ -170,7 +170,7 @@ def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
     layers = multi_layer_feature(body, from_layers, num_filters, strides, pads,
         min_filter=min_filter)
 
-    loc_preds, cls_preds, anchor_boxes = multibox_layer(layers, \
+    loc_preds, attrs_preds, cls_preds, anchor_boxes = multibox_layer(layers, \
         num_classes, sizes=sizes, ratios=ratios, normalization=normalizations, \
         num_channels=num_filters, clip=False, interm_layer=0, steps=steps)
 

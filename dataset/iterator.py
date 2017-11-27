@@ -2,6 +2,7 @@ import mxnet as mx
 import numpy as np
 import cv2
 from tools.rand_sampler import RandSampler
+from tools.data import preprocess
 
 class DetRecordIter(mx.io.DataIter):
     """
@@ -225,11 +226,14 @@ class DetIter(mx.io.DataIter):
                 index = self._index[self._current + i]
             # index = self.debug_index
             im_path = self._imdb.image_path_from_index(index)
-            with open(im_path, 'rb') as fp:
-                img_content = fp.read()
-            img = mx.img.imdecode(img_content)
-            gt = self._imdb.label_from_index(index).copy() if self.is_train else None
-            data, label = self._data_augmentation(img, gt)
+            # with open(im_path, 'rb') as fp:
+            #     img_content = fp.read()
+            # img = mx.img.imdecode(img_content)
+            # gt = self._imdb.label_from_index(index).copy() if self.is_train else None
+            # data, label = self._data_augmentation(img, gt)
+            data = preprocess(cv2.imread(im_path))
+            data = np.transpose(data, (2,1,0))
+            label = None
             batch_data[i] = data
             if self.is_train:
                 batch_label.append(label)

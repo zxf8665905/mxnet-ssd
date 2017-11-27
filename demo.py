@@ -42,7 +42,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Single-shot detection network demo')
     parser.add_argument('--network', dest='network', type=str, default='resnet50',
                         help='which network to use')
-    parser.add_argument('--images', dest='images', type=str, default='./data/demo/dog.jpg',
+    parser.add_argument('--images', dest='images', type=str, default='./data/demo/0.png',
                         help='run demo with images, use comma to seperate multiple images')
     parser.add_argument('--dir', dest='dir', nargs='?',
                         help='demo image directory, optional', type=str)
@@ -57,7 +57,7 @@ def parse_args():
                         action='store_true', default=False)
     parser.add_argument('--gpu', dest='gpu_id', type=int, default=0,
                         help='GPU device id to detect with')
-    parser.add_argument('--data-shape', dest='data_shape', type=int, default=512,
+    parser.add_argument('--data-shape', dest='data_shape', type=int, default=300,
                         help='set image shape')
     parser.add_argument('--mean-r', dest='mean_r', type=float, default=123,
                         help='red mean value')

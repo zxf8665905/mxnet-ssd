@@ -99,6 +99,29 @@ def _as_list(obj):
     else:
         return [obj]
 
+def get_metrics(preds):
+    """
+    Implementation of updating metrics
+    """
+    eps = 1e-8
+    # get generated multi label from network
+    cls_prob = preds[0].asnumpy()
+    loc_loss = preds[1].asnumpy()
+    cls_label = preds[2].asnumpy()
+    valid_count = np.sum(cls_label >= 0)
+    # overall accuracy & object accuracy
+    label = cls_label.flatten()
+    mask = np.where(label >= 0)[0]
+    indices = np.int64(label[mask])
+    prob = cls_prob.transpose((0, 2, 1)).reshape((-1, cls_prob.shape[1]))
+    prob = prob[mask, indices]
+    cls_metric = (-np.log(prob + eps)).sum()
+    cls_num_inst = valid_count
+    # smoothl1loss
+    loc_metric = np.sum(loc_loss)
+    loc_num_inst = valid_count
+    return cls_metric, cls_num_inst, loc_metric, loc_num_inst
+
 def fit(model, train_data, eval_data=None, eval_metric='acc',
         epoch_end_callback=None, batch_end_callback=None, kvstore='local',
         optimizer='sgd', optimizer_params=(('learning_rate', 0.01),),
@@ -139,7 +162,6 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
     Batch = namedtuple('Batch', ['data', 'label'])
 
     for epoch in range(begin_epoch, num_epoch):
-
         for n_frame, data in enumerate(datas):
             data_pre = preprocess(data)
             vis_img = (data_pre.copy() * 255).astype(np.uint8)
@@ -161,9 +183,9 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
                 objs_attrs.append(single_attrs)
             imgs.append(data_pre)
 
-            o_path = '../data/demo/output/{}.png'.format(n_frame)
-            cv2.imwrite(o_path, vis_img)
-            print('writed:{}'.format(o_path))
+            # o_path = '../data/demo/output/{}.png'.format(n_frame)
+            # cv2.imwrite(o_path, vis_img)
+            # print('writed:{}'.format(o_path))
 
             tic = time.time()
             nbatch = 0
@@ -178,15 +200,21 @@ def fit(model, train_data, eval_data=None, eval_metric='acc',
                               label=[mx.nd.array(loc_cls_label), mx.nd.array(attrs_label)])
             model.forward_backward(data_batch)
             model.update()
+            outputs = model.get_outputs()
+            cls_metric, cls_num_inst, loc_metric, loc_num_inst = get_metrics(outputs)
 
             nbatch += 1
 
             toc = time.time()
             model.logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc-tic))
+            model.logger.info('cls_metric:{} cls_num_inst:{} loc_metric:{} loc_num_inst:{}'.format(
+                cls_metric, cls_num_inst, loc_metric, loc_num_inst))
 
             # sync aux params across devices
             arg_params, aux_params = model.get_params()
             model.set_params(arg_params, aux_params)
+        if epoch_end_callback is not None:
+            epoch_end_callback(epoch, model.symbol, arg_params, aux_params)
 
 
 
@@ -355,10 +383,11 @@ def train_net(net, train_path, num_classes, batch_size,
                         fixed_param_names=fixed_param_names)
 
     # fit parameters
-    # batch_end_callback = mx.callback.Speedometer(train_iter.batch_size, frequent=frequent)
-    # epoch_end_callback = mx.callback.do_checkpoint(prefix)
     batch_end_callback = None
     epoch_end_callback = None
+    # batch_end_callback = mx.callback.Speedometer(train_iter.batch_size, frequent=frequent)
+    epoch_end_callback = mx.callback.do_checkpoint(prefix, 20)
+
     learning_rate, lr_scheduler = get_lr_scheduler(learning_rate, lr_refactor_step,
         lr_refactor_ratio, num_example, batch_size, begin_epoch)
     optimizer_params={'learning_rate':learning_rate,
