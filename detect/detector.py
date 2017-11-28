@@ -140,7 +140,7 @@ class Detector(object):
                                          edgecolor=colors[cls_id],
                                          linewidth=3.5)
                     c = (int(colors[cls_id][0]*255), int(colors[cls_id][1]*255), int(colors[cls_id][2]*255))
-                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=c, thickness=1)
+                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=c, thickness=2)
                     # plt.gca().add_patch(rect)
                     class_name = str(cls_id)
                     if classes and len(classes) > cls_id:
@@ -174,11 +174,13 @@ class Detector(object):
 
         """
         import cv2
+        from tools.image_processing import preprocess
         dets = self.im_detect(im_list, root_dir, extension, show_timer=show_timer)
         if not isinstance(im_list, list):
             im_list = [im_list]
         assert len(dets) == len(im_list)
         for k, det in enumerate(dets):
-            img = cv2.imread(im_list[k])
+            img = preprocess(cv2.imread(im_list[k]))
+            img = (img*255).astype(np.uint8)
             img[:, :, (0, 1, 2)] = img[:, :, (2, 1, 0)]
             self.visualize_detection(img, det, classes, thresh)
