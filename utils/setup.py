@@ -6,7 +6,8 @@ from distutils.extension import Extension
 from Cython.Distutils import build_ext
 import numpy as np                           # <---- New line
 
-ext_modules = [Extension("bbox", ["bbox.pyx"])]
+ext_modules = [Extension("bbox", ["bbox.pyx"]),
+               Extension("cpu_nms", ["cpu_nms.pyx"])]
 
 setup(
   name = 'Hello world app',

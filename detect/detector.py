@@ -6,6 +6,50 @@ from dataset.testdb import TestDB
 from dataset.iterator import DetIter
 import cv2
 import time
+from tools.box import boxes_nms
+from tools.data import box_encode, box_decode
+from collections import namedtuple
+from tools.data import draw_box
+
+nms_iou_threhold = 0.1
+nms_topk = 100
+
+
+
+def multibox_detection(cls_prob, attrs_preds, anchors):
+    # cls_prob.shape [batch_size, cls_num]
+    batch_size = cls_prob.shape[0]
+    o_cls_id = []
+    o_probs = []
+    o_boxes = []
+    for i in range(batch_size):
+        single_batch_o_boxes =[]
+        single_batch_cls_prob, single_batch_attrs_preds, single_batch_anchors = \
+            cls_prob[i].T, attrs_preds[i].asnumpy(), anchors[0].asnumpy()
+        cls_id = mx.nd.argmax(single_batch_cls_prob, axis=1).asnumpy().astype(np.int)
+        keep = cls_id > 0
+        cls_id = cls_id[keep]
+        probs = np.array([probs[cls_id[i]] for i,probs in enumerate(single_batch_cls_prob.asnumpy()[keep])])
+        single_batch_anchors = single_batch_anchors[keep]
+        single_batch_attrs_preds = single_batch_attrs_preds[keep]
+
+        for j in range(len(single_batch_anchors)):
+            w = single_batch_attrs_preds[j,0]
+            h = single_batch_attrs_preds[j,1]
+            theta = single_batch_attrs_preds[j, 1]
+            trans = (single_batch_anchors[j][0:2] + single_batch_anchors[j][2:4])/2
+            box = box_encode(trans=trans, w=w, h=h, theta=theta)
+            single_batch_o_boxes.append(box)
+            # convert to nms_box for nms
+            nms_box = np.array([np.min(box[:,0]), np.min(box[:,0]), np.min(box[:,0]), np.min(box[:,0]),probs[j]])
+        keep_ids = boxes_nms(np.array(single_batch_o_boxes),probs, nms_iou_threhold)
+
+        o_cls_id.append(cls_id[keep_ids])
+        o_probs.append(probs[keep_ids])
+        o_boxes.append(np.array(single_batch_o_boxes)[keep_ids])
+    return np.array(o_cls_id)-1, np.array(o_probs), np.array(o_boxes)
+
+
 
 class Detector(object):
     """
@@ -65,17 +109,13 @@ class Detector(object):
             det_iter = mx.io.PrefetchingIter(det_iter)
         start = timer()
         for pred, _, _ in self.mod.iter_predict(det_iter):
-            detections.append(pred[0].asnumpy())
+            o_cls_id, o_probs, o_boxes = multibox_detection(pred[1], pred[2], pred[3])
+            detections.append([o_cls_id, o_probs, o_boxes])
         time_elapsed = timer() - start
         if show_timer:
             print("Detection time for {} images: {:.4f} sec".format(
                 num_images, time_elapsed))
-        for output in detections:
-            for i in range(output.shape[0]):
-                det = output[i, :, :]
-                res = det[np.where(det[:, 0] >= 0)[0]]
-                result.append(res)
-        return result
+        return detections
 
     def im_detect(self, im_list, root_dir=None, extension=None, show_timer=False):
         """
@@ -124,32 +164,15 @@ class Detector(object):
         height = img.shape[0]
         width = img.shape[1]
         colors = dict()
-        for i in range(dets.shape[0]):
-            cls_id = int(dets[i, 0])
-            if cls_id >= 0:
-                score = dets[i, 1]
-                if score > thresh:
-                    if cls_id not in colors:
-                        colors[cls_id] = (random.random(), random.random(), random.random())
-                    xmin = int(dets[i, 2] * width)
-                    ymin = int(dets[i, 3] * height)
-                    xmax = int(dets[i, 4] * width)
-                    ymax = int(dets[i, 5] * height)
-                    rect = plt.Rectangle((xmin, ymin), xmax - xmin,
-                                         ymax - ymin, fill=False,
-                                         edgecolor=colors[cls_id],
-                                         linewidth=3.5)
-                    c = (int(colors[cls_id][0]*255), int(colors[cls_id][1]*255), int(colors[cls_id][2]*255))
-                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=c, thickness=2)
-                    # plt.gca().add_patch(rect)
-                    class_name = str(cls_id)
-                    if classes and len(classes) > cls_id:
-                        class_name = classes[cls_id]
-                    # plt.gca().text(xmin, ymin - 2,
-                    #                 '{:s} {:.3f}'.format(class_name, score),
-                    #                 bbox=dict(facecolor=colors[cls_id], alpha=0.5),
-                    #                 fontsize=12, color='white')
-        # plt.show()
+        o_cls_id, o_probs, o_boxes = dets
+        for i in range(o_cls_id.shape[0]):
+            cls_id = int(o_cls_id[i])
+            score = o_probs[i]
+            if cls_id not in colors:
+                colors[cls_id] = (random.random(), random.random(), random.random())
+            box = np.zeros_like(o_boxes[i])
+            box = o_boxes[i]*height
+            draw_box(img=img, box=box,color=colors[cls_id])
         output_path = './output/{}.png'.format(int(time.time()*1000))
         print('write: {}'.format(output_path))
         cv2.imwrite(output_path, img)
@@ -175,12 +198,24 @@ class Detector(object):
         """
         import cv2
         from tools.image_processing import preprocess
-        dets = self.im_detect(im_list, root_dir, extension, show_timer=show_timer)
-        if not isinstance(im_list, list):
-            im_list = [im_list]
-        assert len(dets) == len(im_list)
-        for k, det in enumerate(dets):
+        Batch = namedtuple('Batch', ['data'])
+        for k, im_path in enumerate(im_list):
             img = preprocess(cv2.imread(im_list[k]))
-            img = (img*255).astype(np.uint8)
             img[:, :, (0, 1, 2)] = img[:, :, (2, 1, 0)]
-            self.visualize_detection(img, det, classes, thresh)
+            data_batch = Batch(data=[mx.nd.transpose(mx.nd.array([img]), axes=(0, 3, 2, 1))])
+            self.mod.forward(data_batch, is_train=False)
+            out = self.mod.get_outputs()
+            img = (img*255).astype(np.uint8)
+            o_cls_id, o_probs, o_boxes = multibox_detection(out[1], out[2], out[3])
+            self.visualize_detection(img, [o_cls_id[k], o_probs[k], o_boxes[k]], classes, thresh)
+
+
+
+if __name__ == '__main__':
+    # test multibox
+    import pickle
+    out = pickle.load(open('../predict.dump', 'rb'))
+    o_cls_id, o_probs, o_boxes =multibox_detection(out[0][1], out[0][2], out[0][3])
+    print('o_cls_id:{}'.format(o_cls_id))
+    print('o_probs:{}'.format(o_probs))
+    print('o_boxes:{}'.format(o_boxes))

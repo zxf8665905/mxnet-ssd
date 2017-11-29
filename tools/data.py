@@ -7,6 +7,7 @@ from collections import namedtuple
 import math
 
 def draw_box(img, box,color=(255,0,255), thickness=2):
+    box = box.astype(np.int32)
     assert box.shape == (4,2)
     for i in range(3):
         cv2.line(img, tuple(box[i]), tuple(box[i+1]), color, thickness)
@@ -37,7 +38,7 @@ def box_decode(box):
 
 
 def rotate_box(box, theta):
-    print('func: box {} theta {}'.format(box,theta))
+    # print('func: box {} theta {}'.format(box,theta))
     box = box.copy()
     rotMat = np.array([ \
         [np.cos(theta), -np.sin(theta)], \
@@ -45,6 +46,14 @@ def rotate_box(box, theta):
     return np.matmul(rotMat, box.T).T
 
 
+def box_encode(trans, w, h, theta):
+    box = np.array([[-w / 2, -h / 2],
+                    [w / 2, -h / 2],
+                    [w / 2, h / 2],
+                    [-w / 2, h / 2]])
+    box_rotated = rotate_box(box, theta)
+    box_rotated = box_rotated + trans
+    return box_rotated
 
 if __name__ == '__main__':
     data_paths = glob.glob('../data/demo/*.png')

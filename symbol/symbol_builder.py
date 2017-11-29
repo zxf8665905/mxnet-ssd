@@ -179,6 +179,6 @@ def get_symbol(network, num_classes, from_layers, num_filters, sizes, ratios,
     out = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
         name="detection", nms_threshold=nms_thresh, force_suppress=force_suppress,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=nms_topk)
-    return out
+    return mx.sym.Group([out, cls_prob, mx.sym.reshape(attrs_preds,[0,-1,3]), anchor_boxes])
 
 
